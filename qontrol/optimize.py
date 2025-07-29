@@ -6,7 +6,6 @@ from functools import partial
 import dynamiqs as dq
 import jax
 import jax.numpy as jnp
-import numpy as np
 import optax
 from dynamiqs.gradient import Gradient
 from dynamiqs.method import Method, Tsit5
@@ -85,6 +84,7 @@ def optimize(
             plot _(bool)_: Whether to plot the results during the optimization (for the
                 epochs where results are plotted, necessarily suffer a time penalty).
             plot_period _(int)_: If plot is True, plot every plot_period.
+            save_period _(int)_: If a filepath is provided, save every save_period.
             xtol _(float)_: Defaults to 1e-8, terminate the optimization if the parameters
                 are not being updated
             ftol _(float)_: Defaults to 1e-8, terminate the optimization if the cost
@@ -96,16 +96,18 @@ def optimize(
     Returns:
         optimized parameters from the final timestep
     """  # noqa E501
-    # initialize
+    
+    # Initialize
     opt_options = {**default_options, **(opt_options or {})}
     opt_state = optimizer.init(parameters)
     cost_values_over_epochs = []
     epoch_times = []
     previous_parameters = parameters
     prev_total_cost = 0.0
+    last_saved_epoch = -1
 
-    # check plotter
-    if plotter is None:
+    # Initialize plotter if needed
+    if plotter is None and opt_options['plot']:
         if (
             isinstance(model, SolveModel)
             and model.exp_ops is not None
@@ -115,6 +117,7 @@ def optimize(
         else:
             plotter = Plotter([plot_fft, plot_controls])
 
+    # Helper function to compute gradient and update the optimizer
     @partial(jax.jit, static_argnames=('_method', '_gradient', '_options'))
     def step(
         _parameters: ArrayLike | dict,
@@ -132,18 +135,26 @@ def optimize(
         _parameters = optax.apply_updates(_parameters, updates)
         return _parameters, grads, _opt_state, aux
 
+    # Initial comments
     if opt_options['verbose'] and filepath is not None:
         print(f'saving results to {filepath}')
+
     try:  # trick for catching keyboard interrupt
         for epoch in range(opt_options['epochs']):
+
+            # Take a step
             epoch_start_time = time.time()
             parameters, grads, opt_state, aux = jax.block_until_ready(
                 step(parameters, costs, model, opt_state, method, gradient, dq_options)
             )
-            elapsed_time = np.around(time.time() - epoch_start_time, decimals=3)
+
+            # Record elapsed time and cost values
+            elapsed_time = jnp.round(time.time() - epoch_start_time, decimals=3)
             total_cost, cost_values, terminate_for_cost, expects = aux
             cost_values_over_epochs.append(cost_values)
             epoch_times.append(elapsed_time)
+
+            # Print updated costs
             if opt_options['verbose']:
                 print(f'epoch: {epoch}, elapsed_time: {elapsed_time} s; ')
                 if isinstance(costs, SummedCost):
@@ -155,21 +166,26 @@ def optimize(
                 else:
                     print(costs, cost_values[0])
 
-            if filepath is not None:
+            # Save and/or plot
+            if filepath is not None and epoch % opt_options['save_period'] == 0:
+                cost_since_last_saved = jnp.asarray(cost_values_over_epochs)[last_saved_epoch+1:]
                 data_dict = {
-                    'cost_values': jnp.asarray(cost_values),
-                    'total_cost': total_cost,
+                    'cost_values': cost_since_last_saved,
+                    'total_cost': jnp.sum(cost_since_last_saved, axis=-1),
                 }
                 if type(parameters) is dict:
                     data_dict = data_dict | parameters
                 else:
                     data_dict['parameters'] = parameters
                 append_to_h5(filepath, data_dict, opt_options)
+                last_saved_epoch = epoch
+
             if opt_options['plot'] and epoch % opt_options['plot_period'] == 0:
                 plotter.update_plots(
                     parameters, costs, model, expects, cost_values_over_epochs, epoch
                 )
-            # early termination
+
+            # Check for early termination
             if not opt_options['ignore_termination']:
                 termination_key = _terminate_early(
                     grads,
@@ -183,10 +199,26 @@ def optimize(
                 )
                 if termination_key != -1:
                     break
+
+            # Update parameters and costs
             previous_parameters = parameters
             prev_total_cost = total_cost
+       
     except KeyboardInterrupt:
         pass
+
+    # Final batch of save and/or plot
+    if filepath is not None:
+        data_dict = {
+            'cost_values': cost_since_last_saved,
+            'total_cost': jnp.sum(cost_since_last_saved, axis=-1),
+        }
+        if type(parameters) is dict:
+            data_dict = data_dict | parameters
+        else:
+            data_dict['parameters'] = parameters
+        append_to_h5(filepath, data_dict, opt_options)
+
     if opt_options['plot']:
         plotter.update_plots(
             parameters,
@@ -196,6 +228,8 @@ def optimize(
             cost_values_over_epochs,
             len(cost_values_over_epochs) - 1,
         )
+
+    # Concluding messages
     if not opt_options['ignore_termination']:
         print(TERMINATION_MESSAGES[termination_key])
     print(
@@ -255,7 +289,7 @@ def _terminate_early(
     if dg < opt_options['gtol']:
         termination_key = 1
     # ftol
-    dF = np.abs(total_cost - prev_total_cost)
+    dF = jnp.abs(total_cost - prev_total_cost)
     if dF < opt_options['ftol'] * total_cost:
         termination_key = 2
     if dx < opt_options['xtol'] * (opt_options['xtol'] + dx):
@@ -270,5 +304,5 @@ def _terminate_early(
 
 def _norm(x: Array) -> Array:
     if x.shape == ():
-        return np.abs(x)
-    return np.linalg.norm(x, ord=np.inf)
+        return jnp.abs(x)
+    return jnp.max(jnp.abs(x))
