@@ -80,7 +80,7 @@ plugins:
 nav:
     - Getting Started: index.md
     - FAQ: FAQ.md
-    - API: api.md
     - Examples:
         - Qubit: examples/qubit.ipynb
         - Kerr Oscillator: examples/Kerr_oscillator.ipynb
+    - API: api.md
