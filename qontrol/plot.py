@@ -121,12 +121,12 @@ def custom_plotter(plotting_functions: list[Callable]) -> Plotter:
     can ask for: if more than four, additional plots will appear in a new row of four,
     and so on.
 
-    Args:
-        plotting_functions _(list[Callable])_: list of functions that each return a plot
+    Parameters:
+        plotting_functions: list of functions that each return a plot
             useful for tracking intermediate results, such as the value of the optimized
             controls, fft of the controls, expectation values, etc. Each function must
             have signature `example_plot_function(ax, expects, model, parameters)` where
-            `ax` is the matplotlib.pyplot.Axes instance where the results are plotted,
+            `ax` is the `matplotlib.pyplot.Axes` instance where the results are plotted,
             `expects` is of type dq.SolveResult.expects (which could be `None`), `model`
             is of type `ql.Model` and `parameters` are the parameters being optimized.
             Of course, some of these arguments may be unused for a particular plot (for
@@ -134,10 +134,9 @@ def custom_plotter(plotting_functions: list[Callable]) -> Plotter:
             `parameters`).
 
     Returns:
-        _(Plotter)_: Plotter whose `update_plots` method is repeatedly called during an
-            optimization run.
+        Plotter whose `update_plots` method is repeatedly called during an optimization run.
 
-    Examples:
+    ??? example "Example"
         We plot the controls as well as the expectation values for two different initial
         states
         ```python

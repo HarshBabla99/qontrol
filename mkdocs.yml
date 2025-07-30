@@ -66,6 +66,7 @@ plugins:
                     show_root_full_path: false # Removes python path e.g. script.function()
                     show_if_no_docstring: false
                     show_labels: false # Declutter labels of class attributes
+                    docstring_style : 'google'
                     docstring_section_style: list 
                     show_signature_annotations: true
                     members_order: source
