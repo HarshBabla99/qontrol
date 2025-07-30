@@ -173,20 +173,23 @@ def optimize(
                     print(costs, cost_values[0])
 
             # Save and/or plot
-            if filepath is not None and epoch % opt_options['save_period'] == 0:
+            if filepath is not None and epoch % opt_options['save_period'] == 0 and epoch > 0:
+                if opt_options['verbose']:
+                    print(f'... saving data; from {last_saved_epoch+1} to {epoch}\n')
                 cost_since_last_saved = jnp.asarray(cost_values_over_epochs)[last_saved_epoch+1:]
                 data_dict = {
                     'cost_values': cost_since_last_saved,
                     'total_cost': jnp.sum(cost_since_last_saved, axis=-1),
                 }
                 if type(parameters) is dict:
-                    data_dict = data_dict | parameters
+                    for key, val in parameters.items():
+                        data_dict[key] = val[None, ...] # extra axis ensures that they're stacked
                 else:
-                    data_dict['parameters'] = parameters
+                    data_dict['parameters'] = parameters[None, ...] # just as above
                 append_to_h5(filepath, data_dict, opt_options)
                 last_saved_epoch = epoch
 
-            if opt_options['plot'] and epoch % opt_options['plot_period'] == 0:
+            if opt_options['plot'] and epoch % opt_options['plot_period'] == 0 and epoch > 0:
                 plotter.update_plots(
                     parameters, costs, model, expects, cost_values_over_epochs, epoch
                 )
@@ -215,6 +218,10 @@ def optimize(
 
     # Final batch of save and/or plot
     if filepath is not None:
+        if opt_options['verbose']:
+            print(f'... saving data; from {last_saved_epoch+1} to {epoch}')
+
+        cost_since_last_saved = jnp.asarray(cost_values_over_epochs)[last_saved_epoch+1:]
         data_dict = {
             'cost_values': cost_since_last_saved,
             'total_cost': jnp.sum(cost_since_last_saved, axis=-1),
@@ -234,16 +241,17 @@ def optimize(
             cost_values_over_epochs,
             len(cost_values_over_epochs) - 1,
         )
-
+    
     # Concluding messages
+    epoch_times = jnp.array(epoch_times)
     if not opt_options['ignore_termination']:
         print(TERMINATION_MESSAGES[termination_key])
     print(
         f'optimization terminated after {epoch} epochs; \n'
         f'average epoch time (excluding jit) of '
-        f'{np.around(np.mean(epoch_times[1:]), decimals=5)} s; \n'
-        f'max epoch time of {np.max(epoch_times[1:])} s; \n'
-        f'min epoch time of {np.min(epoch_times[1:])} s'
+        f'{jnp.round(jnp.mean(epoch_times[1:]), decimals=5)} s; \n'
+        f'max epoch time of {jnp.max(epoch_times[1:])} s; \n'
+        f'min epoch time of {jnp.min(epoch_times[1:])} s'
     )
     if opt_options['verbose'] and filepath is not None:
         print(f'results saved to {filepath}')
