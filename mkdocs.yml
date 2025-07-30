@@ -79,8 +79,10 @@ plugins:
                     show_symbol_type_heading : true
 nav:
     - Getting Started: index.md
-    - FAQ: FAQ.md
     - Examples:
         - Qubit: examples/qubit.ipynb
         - Kerr Oscillator: examples/Kerr_oscillator.ipynb
     - API: api.md
+    - Misc: 
+        - FAQ: FAQ.md
+        - Contributing: contributing.md
