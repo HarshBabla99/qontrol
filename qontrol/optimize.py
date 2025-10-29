@@ -4,15 +4,19 @@ import time
 from functools import partial
 
 import dynamiqs as dq
-import jax
+from dynamiqs.method import Method, Tsit5
+
+from jax import Array, block_until_ready, eval_shape
+from jax.tree import reduce as jtr_reduce
 import jax.numpy as jnp
 import numpy as np
-import optax
-from dynamiqs.gradient import Gradient
-from dynamiqs.method import Method, Tsit5
-from jax import Array
+
 from jaxtyping import ArrayLike
-from optax import GradientTransformation, OptState, TransformInitFn
+import equinox as eqx
+import optimistix as optx
+
+from optax import adam
+from optimistix import AbstractMinimiser, OptaxMinimiser
 
 from .cost import Cost, SummedCost
 from .model import Model, SolveModel
@@ -43,17 +47,15 @@ default_options = {
     'gtol': 1e-8,
 }
 
-
 def optimize(
     parameters: ArrayLike | dict,
     costs: Cost,
     model: Model,
     *,
-    optimizer: GradientTransformation = optax.adam(0.0001, b1=0.99, b2=0.99),  # noqa: B008
+    optimizer: AbstractMinimiser = OptaxMinimiser(adam(1e-4,b1=0.99,b2=0.99), rtol=1e-6, atol=1e-6),
     plotter: Plotter | None = None,
-    method: Method = Tsit5(),  # noqa: B008
-    gradient: Gradient | None = None,
-    dq_options: dq.Options = dq.Options(),  # noqa: B008
+    method: Method = Tsit5(),
+    dq_options: dq.Options = dq.Options(),
     opt_options: dict | None = None,
     filepath: str | None = None,
 ) -> Array | dict:
@@ -97,10 +99,10 @@ def optimize(
 
     Returns:
         optimized parameters from the final timestep
-    """  # noqa E501
-    # initialize
+    """
+
+    # Initialize options and the plotter. Define how parameters will be saved.
     opt_options = {**default_options, **(opt_options or {})}
-    opt_state = optimizer.init(parameters)
     total_cost_over_epochs = []
     cost_values_over_epochs = []
     epoch_times = []
@@ -125,31 +127,21 @@ def optimize(
         else:
             plotter = Plotter([plot_fft, plot_controls])
 
-    @partial(jax.jit, static_argnames=('_method', '_gradient', '_options'))
-    def step(
-        _parameters: ArrayLike | dict,
-        _costs: Cost,
-        _model: Model,
-        _opt_state: OptState,
-        _method: Method,
-        _gradient: Gradient,
-        _options: dq.Options,
-    ) -> [Array, TransformInitFn, Array]:
-        grads, aux = jax.grad(loss, has_aux=True)(
-            _parameters, _costs, _model, _method, _gradient, _options
-        )
-        updates, _opt_state = optimizer.update(grads, _opt_state)
-        _parameters = optax.apply_updates(_parameters, updates)
-        return _parameters, grads, _opt_state, aux
+    # Set up the optimizer
+    args = (costs, model) 
+    _loss = lambda _params, _args : loss(params, _args[0], _args[1], method, dq_options)
+
+    f_struct, aux_struct = eval_shape(_loss, parameters, args)
+    state = optimizer.init(_loss, parameters, args, {}, f_struct, aux_struct, frozenset())
+    
+    step = eqx.filter_jit(eqx.Partial(optimizer.step, fn=_loss, options={}, tags=frozenset()))
 
     if opt_options['verbose'] and filepath is not None:
         print(f'saving results to {filepath}')
     try:  # trick for catching keyboard interrupt
         for epoch in range(opt_options['epochs']):
             epoch_start_time = time.time()
-            parameters, grads, opt_state, aux = jax.block_until_ready(
-                step(parameters, costs, model, opt_state, method, gradient, dq_options)
-            )
+            parameters, state, aux = block_until_ready(step(y=parameters, args=args, state=state))
             elapsed_time = np.around(time.time() - epoch_start_time, decimals=3)
 
             # Unpack and record results
@@ -176,8 +168,7 @@ def optimize(
                     print(costs, cost_values[0])
 
             # Save logic
-            save_period = opt_options['save_period']
-            if filepath is not None and epoch > 0 and epoch % save_period == 0:
+            if filepath is not None and epoch > 0 and epoch % opt_options['save_period'] == 0:
                 _save(
                     cost_values_over_epochs,
                     total_cost_over_epochs,
@@ -188,6 +179,7 @@ def optimize(
                 )
                 last_save_epoch = epoch
                 parameters_since_last_save = _init_saved_parameters(parameters)
+
             # Plot the cost values as well as other desired quantities
             if (
                 opt_options['plot']
@@ -212,6 +204,7 @@ def optimize(
                 )
                 if termination_key != -1:
                     break
+            previous_parameters = parameters
 
     except KeyboardInterrupt:
         pass
@@ -256,13 +249,11 @@ def loss(
     costs: Cost,
     model: Model,
     method: Method,
-    gradient: Gradient,
     dq_options: dq.Options,
 ) -> [float, Array]:
-    result, H = model(parameters, method, gradient, dq_options)
+    result, H = model(parameters, method, dq_options)
     cost_values, terminate = zip(*costs(result, H, parameters), strict=True)
-    total_cost = jax.tree.reduce(jnp.add, cost_values)
-    total_cost = jnp.log(jnp.sum(jnp.asarray(total_cost)))
+    total_cost = jnp.log(jt_reduce(jnp.add, cost_values))
     expects = result.expects if hasattr(result, 'expects') else None
     return total_cost, (total_cost, cost_values, terminate, expects)
 

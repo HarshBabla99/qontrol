@@ -4,7 +4,6 @@ import dynamiqs as dq
 import equinox as eqx
 import jax.tree_util as jtu
 from dynamiqs import QArrayLike, TimeQArray
-from dynamiqs.gradient import Gradient
 from dynamiqs.method import Method, Tsit5
 from dynamiqs.result import Result
 from jax import Array
@@ -292,8 +291,7 @@ class Model(eqx.Module):
     def __call__(
         self,
         parameters: Array | dict,
-        method: Method = Tsit5(),  # noqa B008
-        gradient: Gradient | None = None,
+        method: Method = Tsit5(),
         options: dq.Options = dq.Options(),  # noqa B008
     ) -> tuple[Result, TimeQArray]:
         raise NotImplementedError
@@ -319,8 +317,7 @@ class SESolveModel(SolveModel):
     def __call__(
         self,
         parameters: Array | dict,
-        method: Method = Tsit5(),  # noqa B008
-        gradient: Gradient | None = None,
+        method: Method = Tsit5(),
         options: dq.Options = dq.Options(),  # noqa B008
     ) -> tuple[Result, TimeQArray]:
         new_H = self.H_function(parameters)
@@ -350,8 +347,7 @@ class MESolveModel(SolveModel):
     def __call__(
         self,
         parameters: Array | dict,
-        method: Method = Tsit5(),  # noqa B008
-        gradient: Gradient | None = None,
+        method: Method = Tsit5(),
         options: dq.Options = dq.Options(),  # noqa B008
     ) -> tuple[Result, TimeQArray]:
         new_H = self.H_function(parameters)
@@ -379,8 +375,7 @@ class SEPropagatorModel(PropagatorModel):
     def __call__(
         self,
         parameters: Array | dict,
-        method: Method = Tsit5(),  # noqa B008
-        gradient: Gradient | None = None,
+        method: Method = Tsit5(),
         options: dq.Options = dq.Options(),  # noqa B008
     ) -> tuple[Result, TimeQArray]:
         new_H = self.H_function(parameters)
@@ -403,8 +398,7 @@ class MEPropagatorModel(PropagatorModel):
     def __call__(
         self,
         parameters: Array | dict,
-        method: Method = Tsit5(),  # noqa B008
-        gradient: Gradient | None = None,
+        method: Method = Tsit5(),
         options: dq.Options = dq.Options(),  # noqa B008
     ) -> tuple[Result, TimeQArray]:
         new_H = self.H_function(parameters)
